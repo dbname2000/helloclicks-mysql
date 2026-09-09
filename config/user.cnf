@@ -1,6 +1,52 @@
 [mysqld]
-# Needed for compatibility with existing SQL clients / WordPress.
+# Kept from the Render template: mysqlclient and existing tooling authenticate
+# with the native plugin, and the server must listen on the private network.
 default-authentication-plugin=mysql_native_password
-
-# Listen on all interfaces
 bind-address=0.0.0.0
+
+# ---------------------------------------------------------------------------
+# Memory. Sized for a 4 GB instance. Targets a steady state of roughly 2.2 GB
+# resident so the box stops sitting at 90%.
+# ---------------------------------------------------------------------------
+
+# InnoDB's own data cache. The factory default is 128 MB, which pushed almost
+# all reads through the Linux file cache instead (about 2.8 GB of the RAM the
+# Render graph reports). Caching in the buffer pool is faster and, unlike the
+# file cache, bounded by this number.
+innodb_buffer_pool_size=1536M
+
+# Bypass the OS file cache for data files. Without this, every page lives
+# twice: once in the buffer pool and once in the file cache.
+innodb_flush_method=O_DIRECT
+
+# Global pool for in-memory temporary tables (GROUP BY, DISTINCT, sorting).
+# Factory default is 1 GB of RAM, grown on demand and never shrunk. 256 MB is
+# plenty for this workload; anything larger spills to disk-backed temp tables
+# instead of eating RAM.
+temptable_max_ram=256M
+temptable_use_mmap=OFF
+
+# The built-in statistics collector (performance_schema) held about 150 MB
+# and only ever grows until restart. It is off in normal operation; turn it
+# back on temporarily if a memory breakdown is needed (see README.md).
+performance_schema=OFF
+
+# ---------------------------------------------------------------------------
+# Connections. The app tier holds at most about 13 connections (2 gunicorn
+# workers x 4 threads, 4 Celery children, 1 backup), so the factory default of
+# 151 was never needed and every unused slot is memory reserved for nothing.
+# ---------------------------------------------------------------------------
+max_connections=60
+
+# Drop connections that sit idle for 10 minutes. The app reuses connections
+# for 60 s and health-checks them before reuse, so a reaped connection is
+# reopened transparently; this just guarantees nothing leaks forever.
+wait_timeout=600
+interactive_timeout=600
+
+# Cap the per-connection buffers that MySQL allocates on demand. Defaults are
+# fine, but explicit values stop a future change from silently multiplying
+# per-connection memory by 60.
+sort_buffer_size=512K
+join_buffer_size=512K
+read_rnd_buffer_size=512K
